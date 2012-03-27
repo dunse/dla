@@ -1,0 +1,215 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+"http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Dansguardian Log Analyser</title>
+<style type="text/css">
+@import "https://ajax.googleapis.com/ajax/libs/dojo/1.7.2/dijit/themes/tundra/tundra.css" ;
+@import "https://ajax.googleapis.com/ajax/libs/dojo/1.7.2/dojo/resources/dojo.css" ;
+@import "https://ajax.googleapis.com/ajax/libs/dojo/1.7.2/dojox/grid/resources/tundraGrid.css" ;
+@import "https://ajax.googleapis.com/ajax/libs/dojo/1.7.2/dojox/widget/Toaster/Toaster.css" ;
+
+</style>
+<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/dojo/1.7.2/dojo/dojo.js"
+djConfig="parseOnLoad: true" ></script>
+<script type="text/javascript">
+<!--
+require(["dijit/layout/TabContainer", "dijit/layout/ContentPane"]);
+require(["dojo/data/ItemFileReadStore","dojox/grid/EnhancedGrid"]);
+require(["dojox/charting/Chart","dojox/charting/axis2d/Default","dojox/charting/plot2d/Lines"]);
+require(["dojo/window","dojo/io/iframe"]);
+require(["dojox/widget/Toaster"]);
+
+// Global vars
+var rtInt = 0;
+var chart1;
+
+// Functions to setup the page
+function setupTabs() {
+	var vs = dojo.window.getBox();
+	console.debug('viewport size:', ' width: ', vs.w, ', height: ', vs.h, ', left: ', vs.l, ', top: ', vs.t);
+
+	var tc = new dijit.layout.TabContainer({
+		'doLayout': false,
+		'style': {
+			'width': '100%'
+		}
+	}, 'tc1');
+
+	var cp1 = new dijit.layout.ContentPane({
+		'title': 'Summary',
+		'content': '<div id="simplechart" style="overflow: hidden"></div>',
+		'onShow': function() {
+			if( !chart1 ) {
+				chart1 = new dojox.charting.Chart('simplechart');
+			}
+			drawChart();
+		}
+	});
+	tc.addChild(cp1);
+
+	var cp2Div = dojo.create('div', {});
+	dojo.create('div', {
+		'id': 'grid',
+		'style': {
+			'height': (vs.h/2)-80 + 'px'
+		}
+	}, cp2Div);
+
+	dojo.create("div", {
+		'class': 'output',
+	});
+
+	dojo.create('iframe', {
+		'id': 'theIframe',
+		'style': {
+			'height': (vs.h/2-80) + 'px',
+			'border': '1px solid #333',
+			'width': '100%',
+			'marginTop': '10px',
+		}
+	}, cp2Div);
+
+	var cp2 = new dijit.layout.ContentPane({
+		'title': 'Denied requests',
+		'content': cp2Div,
+		'onShow': function() {
+			var fs = new dojo.data.ItemFileReadStore({
+				'url': 'getDansguardianLog.php?type=2',
+			});
+			grid.setStore(fs);
+		}
+	});
+	tc.addChild(cp2);
+
+	var layout = [[
+		new dojox.grid.cells.RowIndex(),
+		{'name': 'Datetime', 'field': 'datetime'},
+		{'name': 'IP', 'field': 'ip'},
+		{'name': 'User', 'field': 'user', 'width': '2em'},
+		{'name': 'URL', 'field': 'url', 'width': (vs.w - 400) + 'px'},
+		{'name': 'Filter', 'field': 'filter'}
+	]];
+	var grid = new dojox.grid.EnhancedGrid( {
+		'structure': layout,
+		'clientSort': true,
+		'noDataMessage': 'No results found.'
+	}, dojo.byId('grid'))
+	grid.startup();
+	dojo.connect(grid, 'onRowClick', function(evt){
+		console.debug('Setting iframe (' + dojo.byId('theIframe') + ') src to: ' + grid.getItem(evt.rowIndex).url);
+		dojo.io.iframe.setSrc(dojo.byId('theIframe'), grid.getItem(evt.rowIndex).url, true);
+	});
+
+	var cp3Div = dojo.create('div', {
+		'style': {
+		}
+	});
+
+	dojo.create('pre', {
+		'id': 'realtimelog',
+		'style': {
+			'overflow': 'scroll',
+			'height': vs.h-150 + 'px'
+		}
+	}, cp3Div);
+
+	var cp3 = new dijit.layout.ContentPane({
+		'title': 'Realtime log',
+		'content': cp3Div,
+		'onShow': function() {
+			if( !rtInt ) {
+				updateRealtimeLog();
+				rtInt = setInterval(updateRealtimeLog, 5000);
+			}
+		},
+		'onHide': function() {
+			clearInterval(rtInt);
+			rtInt = 0;
+		}
+	});
+	tc.addChild(cp3);
+
+	tc.startup();
+}
+
+function setupToaster() {
+	var errors = new dojox.widget.Toaster({
+		'messageTopic': '/app/error',
+		'positionDirection': 'tr-down'
+	});
+}
+
+dojo.addOnLoad(function(){
+	setupTabs();
+	dojo.byId('realtimelog').newStart = 0;
+	setupToaster();
+});
+
+// AJAX functions
+function updateRealtimeLog() {
+	dojo.xhrGet({
+		'url'      : 'getDansguardianLog.php?type=1&start=' + dojo.byId('realtimelog').newStart,
+		'handleAs' : 'text',
+		'timeout'  : 4000, // Time in milliseconds
+
+		'load'     : function(response, ioArgs) {
+						var dataDiv = dojo.byId('realtimelog');
+						if( response.responseText != "" ) {
+							var newText = dojo.doc.createTextNode(response);
+							dataDiv.appendChild(newText);
+							dataDiv.newStart = eval(parseInt(ioArgs.xhr.getResponseHeader("X-START")) + response.length);
+						}
+						dataDiv.scrollTop = dataDiv.scrollHeight; // Always scroll to bottom
+					},
+
+		'error'    : function(responseObject, ioArgs) {
+						var errorMsg = 'Unknown error';
+						if( ioArgs.xhr.getResponseHeader("ERROR") ) {
+							errorMsg = ioArgs.xhr.getResponseHeader("ERROR");
+						}
+						dojo.publish('/app/error', [{ 'message': errorMsg, 'type': 'error'}]);
+					}
+	});
+}
+
+
+function drawChart() {
+	dojo.xhrGet({
+		'url'      : 'getDansguardianLog.php?type=3',
+		'handleAs' : 'json',
+		'timeout'  : 20000, // Time in milliseconds
+
+		'load'     : function(response, ioArgs) {
+						chart1.removeSeries('Hits');
+						chart1.removeAxis('x');
+						chart1.removeAxis('y');
+						chart1.removePlot('default');
+						chart1.addPlot('default', {'type': 'Lines'});
+						chart1.addAxis('y', {'vertical': true});
+						chart1.addAxis('x', response.labels);
+						chart1.addSeries('Hits', response.series);
+						chart1.render();
+						// Workaround for dojo's div which overflows on to the page if there is too many labels
+						dojo.setAttr(dojo.query('body > div:last-child')[0], "style", { 'top': '-100000px'})
+					},
+
+		'error'	   : function(responseObject, ioArgs) {
+						var errorMsg = 'Unknown error';
+						if( ioArgs.xhr.getResponseHeader("ERROR") ) {
+							errorMsg = ioArgs.xhr.getResponseHeader("ERROR");
+						}
+						dojo.publish('/app/error', [{ 'message': errorMsg, 'type': 'error'}]);
+					}
+	});
+}
+-->
+</script>
+
+</head>
+<body class="tundra">
+ <h1>Dansguardian Log Analyser</h1><br />
+<div id="tc1"></div>
+</body>
+</html>
