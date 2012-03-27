@@ -18,7 +18,7 @@ A PHP enabled web server is required to run this application.
 
 # Installation
 
-Download the package from "Downloads" section.
+Download the package from [here](https://github.com/dunse/dla/zipball/master).
 
 Copy dla/ directory to your web/proxy server running Dansguardian. (E.g. to /var/www/dla/)
 
